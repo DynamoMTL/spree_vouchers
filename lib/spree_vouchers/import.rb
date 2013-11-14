@@ -1,4 +1,4 @@
-class Spree::Voucher
+class SpreeVouchers::Import
   attr_reader   :count
   attr_accessor :name, :usage_limit, :description,
                 :starts_at, :expires_at, :amount
