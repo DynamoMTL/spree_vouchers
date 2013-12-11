@@ -3,6 +3,14 @@ class SpreeVouchers::Import
   attr_accessor :name, :usage_limit, :description,
                 :starts_at, :expires_at, :amount
 
+  module VoucherFileParser
+    extend self
+
+    def each(io, &block)
+      CSV(io.read).each {|row| yield(row.first)}
+    end
+  end
+
   def initialize(params={})
     @params = params
     @name = params[:name]
@@ -16,24 +24,29 @@ class SpreeVouchers::Import
   end
 
   def save
-    attributes = @params.slice(:name, :usage_limit, :description, :starts_at, :expires_at)
-    attributes.merge!(event_name: 'spree.checkout.coupon_code_added')
-
-    each_code do |code|
-      promotion = Spree::Promotion.create(attributes.merge(code: code))
-      action = Spree::Promotion::Actions::CreateAdjustment.new
-      action.activator_id = promotion.id
-      action.calculator = Spree::Calculator::FlatRate.new
-      action.calculator.preferred_amount = @amount
-      action.save
-      @count += 1 if promotion.valid?
+    VoucherFileParser.each(@io) do |code|
+      @count += 1 if create_promo(attributes.merge(code: code))
     end
 
     @count > 0
   end
 
 private
-  def each_code
-    CSV(@io.read).each {|row| yield(row.first)}
+  def attributes
+    @attributes ||= @params.slice(:name, :usage_limit, :description, :starts_at, :expires_at)
+                           .merge(event_name: 'spree.checkout.coupon_code_added')
+  end
+
+  def create_promo(attributes)
+    promotion = Spree::Promotion.create(attributes)
+    create_action(promotion)
+
+    promotion.valid?
+  end
+
+  def create_action(promotion)
+    Spree::Promotion::Actions::CreateAdjustment.create({
+      activator_id: promotion.id,
+      calculator: Spree::Calculator::FlatRate.new(preferred_amount: @amount)}, without_protection: true)
   end
 end
